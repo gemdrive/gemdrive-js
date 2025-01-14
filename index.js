@@ -1,5 +1,6 @@
 import * as http from 'node:http';
 import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs';
 import { createWriteStream } from 'node:fs';
 import * as path from 'node:path';
 import { createRequestListener } from '@mjackson/node-fetch-server';
@@ -40,6 +41,10 @@ async function handler(req) {
      return handleEvents(req);
   }
 
+  if (url.pathname.startsWith('/gemdrive')) {
+    return handleGemDrive(req);
+  }
+
   const fsPath = path.join(fsRoot, url.pathname);
 
   const headers = {
@@ -61,11 +66,25 @@ async function handler(req) {
     }
   }
   else if (req.method === 'POST') {
-    await fs.mkdir(path.dirname(fsPath), { recursive: true });
-    await pipeStreamToFile(req.body, fsPath);
-    emit(clients, JSON.stringify({
-      path: url.pathname,
-    }));
+
+    if (params.get('method') === 'delete') {
+      await fs.rm(fsPath);
+
+      emit(clients, JSON.stringify({
+        type: 'delete',
+        path: url.pathname,
+      }));
+    }
+    else {
+      await fs.mkdir(path.dirname(fsPath), { recursive: true });
+      await pipeStreamToFile(req.body, fsPath);
+
+      emit(clients, JSON.stringify({
+        type: 'write',
+        path: url.pathname,
+      }));
+    }
+
     return new Response(null, {
       headers,
     });
@@ -92,6 +111,38 @@ async function handleEvents(req) {
       'Access-Control-Allow-Origin': '*',
       //'Content-Type': 'application/json',
       //'Content-Type': 'text/plain',
+    },
+  });
+}
+
+async function handleGemDrive(req) {
+
+  const url = new URL(req.url);
+
+  const parts = url.pathname.split('/');
+  const fsDir = path.join(fsRoot, parts.slice(2, -1).join('/'));
+
+  const files = await fs.readdir(fsDir, {
+    withFileTypes: true,
+  });
+
+  const dir = Object.fromEntries(files.map((f) => {
+    const filePath = path.join(f.parentPath, f.name);
+    const statData = nodeFs.statSync(filePath);
+    const suffix = f.isDirectory() ? '/' : '';
+    return [
+      f.name + suffix,
+      {
+        size: statData.size,
+        modTime: new Date(statData.mtimeMs).toISOString(),
+      }
+    ];
+  }));
+
+  return new Response(JSON.stringify(dir), {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Content-Type': 'application/json',
     },
   });
 }
