@@ -6,9 +6,12 @@ import * as path from 'node:path';
 import { createRequestListener } from '@mjackson/node-fetch-server';
 import * as decentauth from 'decent-auth';
 
+const MAX_CONTENT_LENGTH = 1024;
+
 const clients = {};
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8");
 
 const authPrefix = '/auth';
 const fsRoot = 'files';
@@ -77,12 +80,30 @@ async function handler(req) {
     }
     else {
       await fs.mkdir(path.dirname(fsPath), { recursive: true });
-      await pipeStreamToFile(req.body, fsPath);
+      const [ body1, body2 ] = req.body.tee();
 
-      emit(clients, JSON.stringify({
+      const contentPromise = readContent(body2);
+
+      const promises = [ contentPromise, pipeStreamToFile(body1, fsPath) ];
+      const [ { length, content }, _ ] = await Promise.all(promises);
+
+      const statData = await fs.stat(fsPath);
+
+      const data = {
         type: 'write',
+        offset: 0,
+        length,
         path: url.pathname,
-      }));
+        size: statData.size,
+        modTime: new Date(statData.mtimeMs).toISOString(),
+      };
+
+      if (content) {
+        // TODO: can't currently handle binary data
+        data.content = decoder.decode(content);
+      }
+
+      emit(clients, JSON.stringify(data));
     }
 
     return new Response(null, {
@@ -95,6 +116,36 @@ async function handler(req) {
   });
 
   //return Response.redirect(`${url.origin}${authPrefix}`, 303);
+}
+
+async function readContent(body) {
+  return new Promise(async (resolve, reject) => {
+    const partialContent = new Uint8Array(MAX_CONTENT_LENGTH);
+    let offset = 0;
+
+    for await (const chunk of body) {
+      if ((offset + chunk.length) > MAX_CONTENT_LENGTH) {
+        // too big. need to keep reading but skip remaining chunks
+        offset += chunk.length;
+        continue;
+      }
+
+      partialContent.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    if (offset <= MAX_CONTENT_LENGTH) {
+      resolve({
+        length: offset,
+        content: partialContent.slice(0, offset),
+      });
+    }
+    else {
+      resolve({
+        length: offset,
+      });
+    }
+  });
 }
 
 async function handleEvents(req) {
@@ -179,6 +230,10 @@ async function pipeStreamToFile(readableStream, filePath) {
     writableStream.end();
     reader.releaseLock();
   }
+
+  await new Promise((resolve, reject) => {
+    writableStream.on('finish', resolve);
+  });
 }
 
 http.createServer(createRequestListener(handler)).listen(5757);
