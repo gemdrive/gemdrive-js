@@ -38,10 +38,24 @@ async function handler(req) {
     return authServer.handle(req);
   }
 
-  //console.log("Session:", await authServer.getSession(req));
+  const start = performance.now()
+  const session = await authServer.getSession(req);
+  //console.log(session);
+  console.log("dur", url.pathname, performance.now() - start);
 
-  if (params.get('events') === 'true') {
-     return handleEvents(req);
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+  };
+
+  if (!session) {
+    if (url.pathname === '/') {
+      return Response.redirect(`https://example.com/${authPrefix}`);
+    }
+
+    return new Response("No auth", {
+      headers,
+      status: 401,
+    });
   }
 
   if (url.pathname.startsWith('/gemdrive')) {
@@ -49,10 +63,6 @@ async function handler(req) {
   }
 
   const fsPath = path.join(fsRoot, url.pathname);
-
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-  };
 
   if (req.method === 'GET') {
     try {
@@ -79,7 +89,9 @@ async function handler(req) {
       }));
     }
     else {
+
       await fs.mkdir(path.dirname(fsPath), { recursive: true });
+
       const [ body1, body2 ] = req.body.tee();
 
       const contentPromise = readContent(body2);
@@ -90,6 +102,7 @@ async function handler(req) {
       const statData = await fs.stat(fsPath);
 
       const data = {
+        owner: session.id,
         type: 'write',
         offset: 0,
         length,
@@ -155,6 +168,13 @@ async function handleEvents(req) {
   const writer = stream.writable.getWriter();
   clients[clientId] = writer;
 
+  (async () => {
+    await writer.ready;
+    writer.write(JSON.stringify({
+      debug: "init",
+    }) + '\n');
+  })();
+
   console.log(clients); 
 
   return new Response(stream.readable, {
@@ -169,6 +189,10 @@ async function handleEvents(req) {
 async function handleGemDrive(req) {
 
   const url = new URL(req.url);
+
+  if (url.pathname === '/gemdrive/events/') {
+     return handleEvents(req);
+  }
 
   const parts = url.pathname.split('/');
   const fsDir = path.join(fsRoot, parts.slice(2, -1).join('/'));
@@ -199,6 +223,7 @@ async function handleGemDrive(req) {
 }
 
 async function emit(writers, inMsg) {
+  console.log("emit", inMsg);
   for (const id in writers) {
     const msg = inMsg + '\n';
     const writer = writers[id];

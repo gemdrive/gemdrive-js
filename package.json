@@ -11,6 +11,6 @@
   "description": "",
   "dependencies": {
     "@mjackson/node-fetch-server": "^0.5.0",
-    "decent-auth": "^0.5.0"
+    "decent-auth": "file:../decent-auth-js"
   }
 }
