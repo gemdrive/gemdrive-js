@@ -34,7 +34,7 @@ async function handler(req) {
   const url = new URL(req.url);
   const params = new URLSearchParams(url.search);
 
-  if (url.pathname.startsWith(authPrefix)) {
+  if (url.pathname.startsWith(authPrefix) || url.pathname === '/.well-known/oauth-authorization-server') {
     return authServer.handle(req);
   }
 
@@ -52,10 +52,18 @@ async function handler(req) {
       return Response.redirect(`https://example.com/${authPrefix}`);
     }
 
-    return new Response("No auth", {
-      headers,
+    // Return the oauth metadata directly rather than requiring the client to
+    // make another request
+    const req = new Request(`${url.origin}/.well-known/oauth-authorization-server`);
+
+    const metaRes = await authServer.handle(req);
+
+    const res = new Response(metaRes.body, {
       status: 401,
+      headers: metaRes.headers,
     });
+
+    return res;
   }
 
   if (url.pathname.startsWith('/gemdrive')) {
