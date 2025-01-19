@@ -5,8 +5,23 @@ import { createWriteStream } from 'node:fs';
 import * as path from 'node:path';
 import { createRequestListener } from '@mjackson/node-fetch-server';
 import * as decentauth from 'decent-auth';
+import Database from 'libsql';
 
 const MAX_CONTENT_LENGTH = 1024;
+
+const db = new Database('gemdrive.sqlite');
+await db.exec(
+`CREATE TABLE IF NOT EXISTS events(
+  path TEXT NOT NULL,
+  type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mod_time TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  offset INTEGER NOT NULL,
+  length INTEGER NOT NULL,
+  content BLOB
+)`
+);
 
 const clients = {};
 
@@ -91,6 +106,10 @@ async function handler(req) {
     if (params.get('method') === 'delete') {
       await fs.rm(fsPath);
 
+      const results = await db.prepare(
+        `INSERT INTO events(path,type,size,mod_time,owner,offset,length,content) VALUES(?,?,?,?,?,?,?,?)`
+      ).run([url.pathname,'delete',0,'','',0,0,null]);
+
       emit(clients, JSON.stringify({
         type: 'delete',
         path: url.pathname,
@@ -110,14 +129,18 @@ async function handler(req) {
       const statData = await fs.stat(fsPath);
 
       const data = {
-        owner: session.id,
-        type: 'write',
-        offset: 0,
-        length,
         path: url.pathname,
+        type: 'write',
         size: statData.size,
         modTime: new Date(statData.mtimeMs).toISOString(),
+        owner: session.id,
+        offset: 0,
+        length,
       };
+
+      const results = await db.prepare(
+        `INSERT INTO events(path,type,size,mod_time,owner,offset,length,content) VALUES(?,?,?,?,?,?,?,?)`
+      ).run([data.path,data.type,data.size,data.modTime,data.owner,data.offset,data.length,content]);
 
       if (content) {
         // TODO: can't currently handle binary data
