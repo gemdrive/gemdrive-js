@@ -169,31 +169,6 @@ async function readContent(body) {
   });
 }
 
-async function handleEvents(req) {
-  const clientId = crypto.randomUUID();
-  const stream = new TransformStream();
-
-  const writer = stream.writable.getWriter();
-  clients[clientId] = writer;
-
-  (async () => {
-    await writer.ready;
-    writer.write(JSON.stringify({
-      debug: "init",
-    }) + '\n');
-  })();
-
-  console.log(clients); 
-
-  return new Response(stream.readable, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      //'Content-Type': 'application/json',
-      //'Content-Type': 'text/plain',
-    },
-  });
-}
-
 async function handleGemDrive(req) {
 
   const url = new URL(req.url);
@@ -226,6 +201,31 @@ async function handleGemDrive(req) {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Content-Type': 'application/json',
+    },
+  });
+}
+
+async function handleEvents(req) {
+  const clientId = crypto.randomUUID();
+  const stream = new TransformStream();
+
+  const writer = stream.writable.getWriter();
+  clients[clientId] = writer;
+
+  (async () => {
+    await writer.ready;
+    writer.write(JSON.stringify({
+      debug: "init",
+    }) + '\n');
+  })();
+
+  console.log(clients); 
+
+  return new Response(stream.readable, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      //'Content-Type': 'application/json',
+      //'Content-Type': 'text/plain',
     },
   });
 }
