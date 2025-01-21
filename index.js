@@ -47,6 +47,9 @@ const authServer = new decentauth.Server({
         type: decentauth.LOGIN_METHOD_OIDC,
         name: "LastLogin",
         uri: "https://lastlogin.net",
+      },
+      {
+        type: decentauth.LOGIN_METHOD_ATPROTO,
       }
     ],
   },
@@ -256,6 +259,10 @@ async function handleEvents(req) {
   const responseStream = new TransformStream();
 
   clients[clientId] = newEvents.writable.getWriter();
+
+  req.signal.addEventListener('abort', () => {
+    delete clients[clientId];
+  });
 
   (async () => {
     const writer = responseStream.writable.getWriter();
