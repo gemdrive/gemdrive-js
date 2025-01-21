@@ -9,7 +9,8 @@ import Database from 'libsql';
 
 const MAX_CONTENT_LENGTH = 1024;
 
-const db = new Database('gemdrive.sqlite');
+const dbPath = 'gemdrive.sqlite';
+const db = new Database(dbPath);
 await db.exec(
 `CREATE TABLE IF NOT EXISTS events(
   id INTEGER PRIMARY KEY,
@@ -35,6 +36,9 @@ const fsRoot = 'files';
 await fs.mkdir(fsRoot, { recursive: true });
 
 const authServer = new decentauth.Server({
+  kvStore: new decentauth.SqliteKvStore({
+    path: dbPath,
+  }),
   config: {
     path_prefix: authPrefix,
     login_methods: [
