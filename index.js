@@ -12,6 +12,8 @@ const MAX_CONTENT_LENGTH = 1024;
 const db = new Database('gemdrive.sqlite');
 await db.exec(
 `CREATE TABLE IF NOT EXISTS events(
+  id INTEGER PRIMARY KEY,
+  time TEXT NOT NULL,
   path TEXT NOT NULL,
   type TEXT NOT NULL,
   size INTEGER NOT NULL,
@@ -19,7 +21,7 @@ await db.exec(
   owner TEXT NOT NULL,
   offset INTEGER NOT NULL,
   length INTEGER NOT NULL,
-  content BLOB
+  content TEXT
 )`
 );
 
@@ -107,8 +109,8 @@ async function handler(req) {
       await fs.rm(fsPath);
 
       const results = await db.prepare(
-        `INSERT INTO events(path,type,size,mod_time,owner,offset,length,content) VALUES(?,?,?,?,?,?,?,?)`
-      ).run([url.pathname,'delete',0,'','',0,0,null]);
+        `INSERT INTO events(time,path,type,size,mod_time,owner,offset,length,content) VALUES(?,?,?,?,?,?,?,?,?)`
+      ).run([new Date().toISOString(), url.pathname,'delete',0,'','',0,0,null]);
 
       emit(clients, JSON.stringify({
         type: 'delete',
@@ -136,16 +138,16 @@ async function handler(req) {
         owner: session.id,
         offset: 0,
         length,
-      };
-
-      const results = await db.prepare(
-        `INSERT INTO events(path,type,size,mod_time,owner,offset,length,content) VALUES(?,?,?,?,?,?,?,?)`
-      ).run([data.path,data.type,data.size,data.modTime,data.owner,data.offset,data.length,content]);
+      }; 
 
       if (content) {
         // TODO: can't currently handle binary data
         data.content = decoder.decode(content);
       }
+
+      const results = await db.prepare(
+        `INSERT INTO events(time,path,type,size,mod_time,owner,offset,length,content) VALUES(?,?,?,?,?,?,?,?,?)`
+      ).run([new Date().toISOString(),data.path,data.type,data.size,data.modTime,data.owner,data.offset,data.length,data.content]);
 
       emit(clients, JSON.stringify(data));
     }
@@ -229,26 +231,52 @@ async function handleGemDrive(req) {
 }
 
 async function handleEvents(req) {
-  const clientId = crypto.randomUUID();
-  const stream = new TransformStream();
 
-  const writer = stream.writable.getWriter();
-  clients[clientId] = writer;
+  const url = new URL(req.url);
+  const params = new URLSearchParams(url.search);
+
+  const clientId = crypto.randomUUID();
+  // Using two separate streams here because we need to return a stream
+  // immediately, but there might also be new events before the async section
+  // below executes and we don't want those to get lost
+  const queuingStrat = new CountQueuingStrategy({
+    highWaterMark: 128,
+  });
+  const newEvents = new TransformStream({}, queuingStrat);
+  const responseStream = new TransformStream();
+
+  clients[clientId] = newEvents.writable.getWriter();
 
   (async () => {
+    const writer = responseStream.writable.getWriter();
     await writer.ready;
-    writer.write(JSON.stringify({
+    await writer.write(JSON.stringify({
       debug: "init",
     }) + '\n');
+
+    const sinceParam = params.get('since');
+
+    if (sinceParam) {
+      const stmt = db.prepare(`
+        SELECT * FROM events WHERE time >= ?;
+      `);
+
+      for (const evt of stmt.iterate([sinceParam])) {
+        await writer.write(JSON.stringify(evt) + '\n');
+      }
+    }
+
+    writer.releaseLock();
+    
+    newEvents.readable.pipeTo(responseStream.writable);
   })();
 
   console.log(clients); 
 
-  return new Response(stream.readable, {
+  return new Response(responseStream.readable, {
     headers: {
       'Access-Control-Allow-Origin': '*',
-      //'Content-Type': 'application/json',
-      //'Content-Type': 'text/plain',
+      'Content-Type': 'application/x-ndjson',
     },
   });
 }
