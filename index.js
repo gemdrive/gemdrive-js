@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { createRequestListener } from '@mjackson/node-fetch-server';
 import * as decentauth from 'decent-auth';
 import Database from 'libsql';
+import { computeHash } from './utils.js';
 
 const MAX_CONTENT_LENGTH = 1024;
 
@@ -95,7 +96,12 @@ async function handler(req) {
 
   if (req.method === 'GET') {
     try {
+      const statData = await fs.stat(fsPath);
       const data = await fs.readFile(fsPath);
+
+      const hashInput = statData.size + new Date(statData.mtimeMs).toISOString();
+      const etag = await computeHash(hashInput);
+      headers['ETag'] = etag.slice(0, 16);
       return new Response(data, {
         headers,
       });
