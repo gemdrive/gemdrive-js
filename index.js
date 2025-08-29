@@ -8,6 +8,9 @@ import * as decentauth from 'decent-auth';
 import Database from 'libsql';
 import { computeHash } from './utils.js';
 
+const behindProxy = true;
+//const behindProxy = false;
+
 const MAX_CONTENT_LENGTH = 1024;
 
 const dbPath = 'gemdrive.sqlite';
@@ -37,10 +40,12 @@ const fsRoot = 'files';
 await fs.mkdir(fsRoot, { recursive: true });
 
 const authServer = new decentauth.Server({
+  // TODO: we should probably be passing this a libsql instance
   kvStore: new decentauth.SqliteKvStore({
     path: dbPath,
   }),
   config: {
+    behind_proxy: behindProxy,
     path_prefix: authPrefix,
     login_methods: [
       {
@@ -59,13 +64,18 @@ async function handler(req) {
   const url = new URL(req.url);
   const params = new URLSearchParams(url.search);
 
+  console.log("here", req);
+
+  const host = behindProxy ? req.headers.get('X-Forwarded-Host') : url.host;
+  const proto = behindProxy ? req.headers.get('X-Forwarded-Proto') + ':' : url.protocol;
+
   if (url.pathname.startsWith(authPrefix) || url.pathname === '/.well-known/oauth-authorization-server') {
     return authServer.handle(req);
   }
 
   const start = performance.now()
   const session = await authServer.getSession(req);
-  //console.log(session);
+  console.log("sesh", session);
   console.log("dur", url.pathname, performance.now() - start);
 
   const headers = {
@@ -74,14 +84,14 @@ async function handler(req) {
 
   if (!session) {
     if (url.pathname === '/') {
-      return Response.redirect(`https://example.com/${authPrefix}`);
+      return Response.redirect(`${proto}//${host}${authPrefix}`);
     }
 
     // Return the oauth metadata directly rather than requiring the client to
     // make another request
-    const req = new Request(`${url.origin}/.well-known/oauth-authorization-server`);
+    const authServerReq = new Request(`${url.origin}/.well-known/oauth-authorization-server`);
 
-    const metaRes = await authServer.handle(req);
+    const metaRes = await authServer.handle(authServerReq);
 
     const res = new Response(metaRes.body, {
       status: 401,
