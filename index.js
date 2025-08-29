@@ -3,10 +3,10 @@ import * as fs from 'node:fs/promises';
 import * as nodeFs from 'node:fs';
 import { createWriteStream } from 'node:fs';
 import * as path from 'node:path';
-import { createRequestListener } from '@mjackson/node-fetch-server';
 import * as decentauth from 'decent-auth';
 import Database from 'libsql';
 import { computeHash } from './utils.js';
+import { serve } from 'fetch-handler';
 
 const behindProxy = true;
 //const behindProxy = false;
@@ -61,10 +61,9 @@ const authServer = new decentauth.Server({
 });
 
 async function handler(req) {
+  console.log(req.url);
   const url = new URL(req.url);
   const params = new URLSearchParams(url.search);
-
-  console.log("here", req);
 
   const host = behindProxy ? req.headers.get('X-Forwarded-Host') : url.host;
   const proto = behindProxy ? req.headers.get('X-Forwarded-Proto') + ':' : url.protocol;
@@ -347,4 +346,7 @@ async function pipeStreamToFile(readableStream, filePath) {
   });
 }
 
-http.createServer(createRequestListener(handler)).listen(5757);
+serve({
+  handler,
+  port: 5757,
+});
