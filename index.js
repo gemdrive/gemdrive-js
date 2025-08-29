@@ -8,6 +8,8 @@ import Database from 'libsql';
 import { computeHash } from './utils.js';
 import { serve } from 'fetch-handler';
 
+const adminId = process.argv[2];
+
 const behindProxy = true;
 //const behindProxy = false;
 
@@ -98,6 +100,10 @@ async function handler(req) {
     });
 
     return res;
+  }
+  else if (session.id !== adminId) {
+    const uri = `${proto}//${host}${authPrefix}/logout`;
+    return Response.redirect(uri, 303);
   }
 
   if (url.pathname.startsWith('/gemdrive')) {
